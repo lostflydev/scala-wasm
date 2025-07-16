@@ -2188,6 +2188,43 @@ object Build {
       jUnitRuntime % "test", testBridge % "test"
   )
 
+  // component-model
+  lazy val cmHelloworld: MultiScalaProject = MultiScalaProject(
+      id = "cmHelloWorld", base = file("examples") / "component-model" / "helloworld"
+  ).enablePlugins(
+      MyScalaJSPlugin
+  ).settings(
+      exampleSettings,
+      name := "Example main module for component model",
+      scalaJSLinkerConfig ~= {
+        _.withPrettyPrint(true)
+         .withModuleKind(ModuleKind.ESModule)
+         .withWasmFeatures(
+           _.withExceptionHandling(false)
+            .withTargetPureWasm(true)
+            .withComponentModel(true)
+         )
+      },
+  ).withScalaJSCompiler.dependsOnLibrary
+
+  lazy val cmPlugin: MultiScalaProject = MultiScalaProject(
+      id = "cmPlugin", base = file("examples") / "component-model" / "plugin"
+  ).enablePlugins(
+      MyScalaJSPlugin
+  ).settings(
+      exampleSettings,
+      name := "Example plugin module for component model",
+      scalaJSLinkerConfig ~= {
+        _.withPrettyPrint(true)
+         .withModuleKind(ModuleKind.ESModule)
+         .withWasmFeatures(
+           _.withExceptionHandling(false)
+            .withTargetPureWasm(true)
+            .withComponentModel(true)
+         )
+      },
+  ).withScalaJSCompiler.dependsOnLibrary
+
   // Testing
 
   def testSuiteCommonSettings(isJSTest: Boolean): Seq[Setting[_]] = Seq(

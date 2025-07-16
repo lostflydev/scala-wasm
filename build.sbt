@@ -41,5 +41,7 @@ val testSuiteLinker = Build.testSuiteLinker
 val partest = Build.partest
 val partestSuite = Build.partestSuite
 val scalaTestSuite = Build.scalaTestSuite
+val cmHelloWorld = Build.cmHelloworld
+val cmPlugin = Build.cmPlugin
 
 inThisBuild(Build.thisBuildSettings)

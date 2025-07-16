@@ -1,0 +1,16 @@
+package component:scala;
+
+interface greeting {
+    greet: func(a: string) -> string;
+}
+
+world plugin {
+    export greeting;
+}
+
+world main {
+    export wasi:cli/run@0.2.0;
+    import wasi:cli/stdout@0.2.0;
+    import wasi:clocks/monotonic-clock@0.2.0;
+    import greeting;
+}

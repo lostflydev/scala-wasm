@@ -1,0 +1,43 @@
+10
+Average time: 945 ns
+stddev 319.5434242790798
+
+100
+Average time: 1994 ns
+stddev: 187.28 ns²
+
+1000
+Average time: 22269ns
+stddev: 748.4310255461087
+
+10000
+Average time: 125425 ns
+stddev: 4631.216578826778
+
+Rust
+10
+Average:  184.95 ns
+Stddev: 50.26 ns
+100
+Average:  487.34 ns
+Stddev: 47.87 ns
+
+1000
+Average:  3573.83 ns
+Stddev: 212.40 ns
+
+10000
+Average:  29035.29 ns
+Stddev: 3182.86 ns
+
+---
+
+direct function call
+10
+114 ns
+90.41570660012562
+
+Average time: 137 ns
+104.28326807307106
+
+

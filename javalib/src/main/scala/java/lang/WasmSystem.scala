@@ -26,8 +26,7 @@ protected[lang] object WasmSystem {
 
   @noinline
   def nanoTime(): scala.Long = {
-    val d = clocks.WallClock.now()
-    d.seconds * 1000000000 + d.nanoseconds
+    clocks.MonotonicClock.now()
   }
 
   @noinline
