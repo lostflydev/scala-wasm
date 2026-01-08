@@ -791,6 +791,65 @@ object Build {
       }
   )
 
+  def cleanIRSettingsForPackages(packagePaths: String*): Seq[Setting[_]] = Def.settings(
+      // In order to rewrite anonymous functions and tuples, the code must not be specialized
+      scalacOptions += "-no-specialization",
+
+      Compile / products := {
+        val s = streams.value
+
+        val prevProducts = (Compile / products).value
+
+        val outputDir = crossTarget.value / "cleaned-classes"
+
+        val irCleaner = new JavalibIRCleaner((LocalRootProject / baseDirectory).value.toURI())
+
+        // Filter to only include files from specified packages
+        val allMappings = (PathFinder(prevProducts) ** "*.sjsir")
+          .pair(Path.rebase(prevProducts, outputDir))
+
+        val libFileMappings = allMappings.filter { case (input, _) =>
+          val inputPath = input.toString.replace('\\', '/')
+          packagePaths.exists(pkg => inputPath.contains(s"/$pkg/"))
+        }
+
+        val dependencyFiles = {
+          val cp = Attributed.data((Compile / internalDependencyClasspath).value)
+          cp.flatMap { entry =>
+            if (entry.getName().endsWith(".jar"))
+              Seq(entry)
+            else
+              (PathFinder(entry) ** "*.sjsir").get
+          }
+        }
+
+        FileFunction.cached(s.cacheDirectory / "cleaned-sjsir",
+            FilesInfo.lastModified, FilesInfo.exists) { _ =>
+          if (libFileMappings.nonEmpty) {
+            s.log.info(s"Patching sjsir files for ${thisProject.value.id} (${packagePaths.mkString(", ")})...")
+
+            if (outputDir.exists)
+              IO.delete(outputDir)
+            IO.createDirectory(outputDir)
+
+            val cleanedFiles = irCleaner.cleanIR(dependencyFiles, libFileMappings, s.log)
+
+            // Copy non-cleaned files from prevProducts to outputDir
+            val cleanedPaths = cleanedFiles.map(_.toString.replace('\\', '/'))
+            val nonCleanedMappings = allMappings.filterNot { case (_, output) =>
+              cleanedPaths.contains(output.toString.replace('\\', '/'))
+            }
+
+            IO.copy(nonCleanedMappings)
+          } else {
+            s.log.info(s"No sjsir files to patch for ${thisProject.value.id}")
+          }
+        } ((dependencyFiles ++ libFileMappings.map(_._1)).toSet)
+
+        Seq(outputDir)
+      }
+  )
+
   val recompileAllOrNothingSettings = Def.settings(
     /* Recompile all sources when at least 1/10,000 of the source files have
      * changed, i.e., as soon as at least one source file changed.
@@ -1855,6 +1914,9 @@ object Build {
       exportJars := !isGeneratingForIDE,
       previousArtifactSetting,
       mimaBinaryIssueFilters ++= BinaryIncompatibilities.Library,
+
+      // Clean IR for wasi and wit packages to remove Scala library references
+      cleanIRSettingsForPackages("scala/scalajs/wasi", "scala/scalajs/wit"),
 
       /* Silence a Scala 2.13.13+ warning that we cannot address without breaking our API.
        * See `js.WrappedDictionary.keys` and `js.WrappedMap.keys`.
