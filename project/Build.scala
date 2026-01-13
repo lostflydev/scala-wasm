@@ -2358,9 +2358,6 @@ object Build {
                 // scalalib
                 !endsWith(f, "/scalalib/SymbolTest.scala") && // Symbol#JSUniquenessCache
 
-                // javalib/math
-                !endsWith(f, "/javalib/math/BigIntegerToStringTest.scala") && // Long.toStringImpl
-
                 // javalib/lang
                 !endsWith(f, "/lang/ClassValueTest.scala") && // js.Map in ClassValue
                 !endsWith(f, "/lang/SystemPropertiesTest.scala") && // dictionary in SystemProperties
@@ -2368,7 +2365,6 @@ object Build {
                 // javalib/util
                 !endsWith(f, "/FormatterTest.scala") &&
                 !endsWith(f, "/ArraysTest.scala") && // Arrays.deepEquals
-                !endsWith(f, "/IntConsumerTest.scala") && // Long#StringRadixInfos
                 !endsWith(f, "/DateTest.scala") && // js.Date
                 !endsWith(f, "/PropertiesTest.scala") && // Date.toString
 
