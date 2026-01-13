@@ -484,8 +484,6 @@ class StringTest {
   }
 
   @Test def format(): Unit = {
-    assumeFalse("String#format", executingInPureWebAssembly)
-    LinkingInfo.linkTimeIf(!LinkingInfo.targetPureWasm) {
     assertEquals("5", String.format("%d", new Integer(5)))
     assertEquals("00005", String.format("%05d", new Integer(5)))
     assertEquals("0x005", String.format("%0#5x", new Integer(5)))
@@ -496,7 +494,6 @@ class StringTest {
     assertEquals("fffffffd", String.format("%x", new Integer(-3)))
     if (!executingInJVM)
       assertEquals("fffffffc", String.format("%x", new java.lang.Byte(-4.toByte)))
-    } {}
   }
 
   @Test def getBytes(): Unit = {
