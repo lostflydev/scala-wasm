@@ -191,8 +191,6 @@ class LongTest {
   }
 
   @Test def parseStringBase2To36(): Unit = {
-    assumeFalse("Doesn't link StringRadixInfos", executingInPureWebAssembly)
-    LinkingInfo.linkTimeIf(!LinkingInfo.targetPureWasm) {
     def test(radix: Int, s: String, v: Long): Unit = {
       assertEquals(v, JLong.parseLong(s, radix))
       assertEquals(v, JLong.valueOf(s, radix).longValue())
@@ -211,7 +209,6 @@ class LongTest {
       val n = genTestValue(i)
       test(radix, JLong.toString(n, radix), n)
     }
-    } {}
   }
 
   @Test def parseStringsBaseLessThanTwoOrBaseLargerThan36Throws(): Unit = {
@@ -338,8 +335,6 @@ class LongTest {
   }
 
   @Test def toStringRadix(): Unit = {
-    assumeFalse("Long#toStringImpl", executingInPureWebAssembly)
-    LinkingInfo.linkTimeIf(!LinkingInfo.targetPureWasm) {
     /* Ported from
      * https://github.com/gwtproject/gwt/blob/master/user/test/com/google/gwt/emultest/java/lang/JLongTest.java
      */
@@ -351,7 +346,6 @@ class LongTest {
     assertEquals("9223372036854775807", JLong.toString(0x7fffffffffffffffL, 10))
     assertEquals("-8000000000000000", JLong.toString(0x8000000000000000L, 16))
     assertEquals("7fffffffffffffff", JLong.toString(0x7fffffffffffffffL, 16))
-    } {}
   }
 
   @Test def highestOneBit(): Unit = {
@@ -924,8 +918,6 @@ class LongTest {
   }
 
   @Test def toUnsignedString(): Unit = {
-    assumeFalse("Long$.toUnsignedString(long)", executingInPureWebAssembly)
-    LinkingInfo.linkTimeIf(!LinkingInfo.targetPureWasm) {
     def test(x: Long, s: String, radix: Int = 10): Unit = {
       assertEquals(s, JLong.toUnsignedString(x, radix))
       if (radix == 10) {
@@ -1108,7 +1100,6 @@ class LongTest {
     test(325L, "91", 36)
     test(-5110L, "3w5e11264scui", 36)
     test(156326L, "3cme", 36)
-    } {}
   }
 
   @Test def sum(): Unit = {

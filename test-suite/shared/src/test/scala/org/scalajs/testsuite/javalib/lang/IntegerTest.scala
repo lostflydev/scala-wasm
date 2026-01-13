@@ -686,12 +686,9 @@ class IntegerTest {
   }
 
   @Test def toStringRadix(): Unit = {
-    assumeFalse("Integer$$toStringBase", executingInPureWebAssembly)
-
     /* Spec ported from
      * https://github.com/gwtproject/gwt/blob/master/user/test/com/google/gwt/emultest/java/lang/IntegerTest.java
      */
-    LinkingInfo.linkTimeIf(!LinkingInfo.targetPureWasm) {
     assertEquals("17777777777", Integer.toString(2147483647, 8))
     assertEquals("7fffffff", Integer.toString(2147483647, 16))
     assertEquals("1111111111111111111111111111111", Integer.toString(2147483647, 2))
@@ -704,7 +701,6 @@ class IntegerTest {
     assertEquals("-80000000", Integer.toString(-2147483648, 16))
     assertEquals("-10000000000000000000000000000000", Integer.toString(-2147483648, 2))
     assertEquals("-2147483648", Integer.toString(-2147483648, 10))
-    } {}
   }
 
   @Test def parseUnsignedIntRadix(): Unit = {
@@ -809,22 +805,15 @@ class IntegerTest {
   }
 
   @Test def toUnsignedString(): Unit = {
-    assumeFalse("Integer$$toStringBase", executingInPureWebAssembly)
-
-    LinkingInfo.linkTimeIf(!LinkingInfo.targetPureWasm) {
     assertEquals("0", Integer.toUnsignedString(0))
     assertEquals("12345", Integer.toUnsignedString(12345))
     assertEquals("242134", Integer.toUnsignedString(242134))
     assertEquals("2147483647", Integer.toUnsignedString(Integer.MAX_VALUE))
     assertEquals("4294967295", Integer.toUnsignedString(0xFFFFFFFF))
     assertEquals("4000000000", Integer.toUnsignedString(0xEE6B2800))
-    } {}
   }
 
   @Test def toUnsignedStringRadix(): Unit = {
-    assumeFalse("Integer$$toStringBase", executingInPureWebAssembly)
-
-    LinkingInfo.linkTimeIf(!LinkingInfo.targetPureWasm) {
     assertEquals("17777777777", Integer.toUnsignedString(2147483647, 8))
     assertEquals("7fffffff", Integer.toUnsignedString(2147483647, 16))
     assertEquals("1111111111111111111111111111111",
@@ -834,7 +823,6 @@ class IntegerTest {
     assertEquals("4294967295", Integer.toUnsignedString(0xFFFFFFFF, 10))
     assertEquals("ee6b2800", Integer.toUnsignedString(0xEE6B2800, 16))
     assertEquals("4000000000", Integer.toUnsignedString(0xEE6B2800, 10))
-    } {}
   }
 
   @Test def testStaticHashCode(): Unit = {
