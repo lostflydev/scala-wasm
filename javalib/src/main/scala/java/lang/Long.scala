@@ -146,39 +146,47 @@ object Long {
 
   // Must be called only with valid radix
   private def toStringImpl(i: scala.Long, radix: Int): String = {
-    import js.JSNumberOps.enableJSNumberOps
+    LinkingInfo.linkTimeIf(LinkingInfo.isWebAssembly) {
+      IntegerLong.toSignedStringImpl(i, radix)
+    } {
+      import js.JSNumberOps.enableJSNumberOps
 
-    val lo = i.toInt
-    val hi = (i >>> 32).toInt
+      val lo = i.toInt
+      val hi = (i >>> 32).toInt
 
-    if (lo >> 31 == hi) {
-      // It's a signed int32
-      lo.toString(radix)
-    } else if (((hi ^ (hi >> 10)) & 0xffe00000) == 0) { // see RuntimeLong.isSignedSafeDouble
-      // (lo, hi) is small enough to be a Double, so toDouble is exact
-      i.toDouble.toString(radix)
-    } else {
-      val abs = Math.abs(i)
-      val s = toUnsignedStringInternalLarge(abs.toInt, (abs >>> 32).toInt, radix)
-      if (hi < 0) "-" + s else s
+      if (lo >> 31 == hi) {
+        // It's a signed int32
+        lo.toString(radix)
+      } else if (((hi ^ (hi >> 10)) & 0xffe00000) == 0) { // see RuntimeLong.isSignedSafeDouble
+        // (lo, hi) is small enough to be a Double, so toDouble is exact
+        i.toDouble.toString(radix)
+      } else {
+        val abs = Math.abs(i)
+        val s = toUnsignedStringInternalLarge(abs.toInt, (abs >>> 32).toInt, radix)
+        if (hi < 0) "-" + s else s
+      }
     }
   }
 
   // Must be called only with valid radix
   private def toUnsignedStringImpl(i: scala.Long, radix: Int): String = {
-    import js.JSNumberOps.enableJSNumberOps
+    LinkingInfo.linkTimeIf(LinkingInfo.isWebAssembly) {
+      IntegerLong.toUnsignedStringImpl(i, radix)
+    } {
+      import js.JSNumberOps.enableJSNumberOps
 
-    val lo = i.toInt
-    val hi = (i >>> 32).toInt
+      val lo = i.toInt
+      val hi = (i >>> 32).toInt
 
-    if (hi == 0) {
-      // It's an unsigned int32
-      Integer.toUnsignedDouble(lo).toString(radix)
-    } else if ((hi & 0xffe00000) == 0) { // see RuntimeLong.isUnsignedSafeDouble
-      // (lo, hi) is small enough to be a Double, so toDouble is exact
-      i.toDouble.toString(radix)
-    } else {
-      toUnsignedStringInternalLarge(lo, hi, radix)
+      if (hi == 0) {
+        // It's an unsigned int32
+        Integer.toUnsignedDouble(lo).toString(radix)
+      } else if ((hi & 0xffe00000) == 0) { // see RuntimeLong.isUnsignedSafeDouble
+        // (lo, hi) is small enough to be a Double, so toDouble is exact
+        i.toDouble.toString(radix)
+      } else {
+        toUnsignedStringInternalLarge(lo, hi, radix)
+      }
     }
   }
 

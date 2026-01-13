@@ -213,6 +213,61 @@ private[lang] object IntegerLong {
   }
 
   @inline
+  def toUnsignedStringImpl[I, F](value: I, radix: Int)(
+      implicit ops: IntFloatBits[I, F]): String = {
+    import ops._
+
+    if (ieq(value, zero)) {
+      "0"
+    } else {
+      val maxChars = bitSize
+      val buffer = new Array[Char](maxChars)
+      var pos = maxChars - 1
+
+      val radixI = fromInt32(radix)
+      val result = newIntBox(value)
+
+      while (ine(result(), zero)) {
+        val digit = toInt32Wrap(remainderUnsigned(result(), radixI))
+        buffer(pos) = Character.forDigit(digit, radix)
+        pos -= 1
+        result() = divideUnsigned(result(), radixI)
+      }
+      new String(buffer, pos + 1, maxChars - pos - 1)
+    }
+  }
+
+  @inline
+  def toSignedStringImpl[I, F](value: I, radix: Int)(
+      implicit ops: IntFloatBits[I, F]): String = {
+    import ops._
+
+    if (ieq(value, zero)) {
+      "0"
+    } else if (value > zero) {
+      toUnsignedStringImpl(value, radix)
+    } else {
+      val maxChars = bitSize + 1
+      val buffer = new Array[Char](maxChars)
+      var pos = maxChars - 1
+
+      val radixI = fromInt32(radix)
+      val result = newIntBox(value)
+
+      while (ine(result(), zero)) {
+        val r = rem(result(), radixI)
+        val digit = toInt32Wrap(-r)
+        buffer(pos) = Character.forDigit(digit, radix)
+        pos -= 1
+        result() = div(result(), radixI)
+      }
+      buffer(pos) = '-'
+      pos -= 1
+      new String(buffer, pos + 1, maxChars - pos - 1)
+    }
+  }
+
+  @inline
   private def parallelSuffix[I, F](x: I)(implicit ops: IntFloatBits[I, F]): I = {
     // Hacker's Delight, Section 5-2
 

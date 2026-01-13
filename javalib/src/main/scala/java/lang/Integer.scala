@@ -380,19 +380,17 @@ object Integer {
     if (radix == 10 || Character.isRadixInvalid(radix)) {
       Integer.toString(i)
     } else {
-      import js.JSNumberOps.enableJSNumberOps
-      i.toString(radix)
+      LinkingInfo.linkTimeIf(LinkingInfo.isWebAssembly) {
+        IntegerLong.toSignedStringImpl(i, radix)
+      } {
+        import js.JSNumberOps.enableJSNumberOps
+        i.toString(radix)
+      }
     }
   }
 
-  @inline def toUnsignedString(i: scala.Int): String = {
-    // TODO: pure wasm toUnsignedString(i, radix)
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
-      java.lang.Long.toString(Integer.toUnsignedLong(i))
-    } {
-      toUnsignedString(i, 10)
-    }
-  }
+  @inline def toUnsignedString(i: scala.Int): String =
+    toUnsignedString(i, 10)
 
   @inline def hashCode(value: Int): Int = value.hashCode
 
@@ -401,7 +399,11 @@ object Integer {
   @inline def min(a: Int, b: Int): Int = Math.min(a, b)
 
   @inline private[this] def toStringBase(i: scala.Int, base: scala.Int): String = {
-    import js.JSNumberOps.enableJSNumberOps
-    toUnsignedDouble(i).toString(base)
+    LinkingInfo.linkTimeIf(LinkingInfo.isWebAssembly) {
+      IntegerLong.toUnsignedStringImpl(i, base)
+    } {
+      import js.JSNumberOps.enableJSNumberOps
+      toUnsignedDouble(i).toString(base)
+    }
   }
 }
