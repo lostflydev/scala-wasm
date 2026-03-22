@@ -54,8 +54,6 @@ private[optimizer] abstract class OptimizerCore(
 
   private val isWasm: Boolean = config.coreSpec.targetIsWebAssembly
 
-  private val targetPureWasm: Boolean = config.coreSpec.wasmFeatures.targetPureWasm
-
   // Uncomment and adapt to print debug messages only during one method
   // lazy val debugThisMethod: Boolean =
   //  debugID == "java.lang.FloatingPointBits$.numberHashCode;D;I"
@@ -146,7 +144,7 @@ private[optimizer] abstract class OptimizerCore(
     !config.coreSpec.esFeatures.allowBigIntsForLongs && !isWasm
 
   private val intrinsics =
-    Intrinsics.buildIntrinsics(config.coreSpec.esFeatures, isWasm, targetPureWasm)
+    Intrinsics.buildIntrinsics(config.coreSpec)
 
   private val integerDivisions = new IntegerDivisions(useRuntimeLong)
 
@@ -843,7 +841,7 @@ private[optimizer] abstract class OptimizerCore(
       .withLocalDefs(paramLocalDefs)
       .withLocalDefs(restParamLocalDef.toList)
 
-    transformCapturingBody(captureParams, tcaptureValues, body, innerEnv) {
+    transformCapturingBody(captureParams, tcaptureValues, resultType, body, innerEnv) {
       (newCaptureParams, newCaptureValues, newBody) =>
         val newClosure = {
           Closure(flags, newCaptureParams, newParams, newRestParam, resultType,
@@ -854,7 +852,7 @@ private[optimizer] abstract class OptimizerCore(
   }
 
   private def transformCapturingBody(captureParams: List[ParamDef],
-      tcaptureValues: List[PreTransform], body: Tree, innerEnv: OptEnv)(
+      tcaptureValues: List[PreTransform], resultType: Type, body: Tree, innerEnv: OptEnv)(
       inner: (List[ParamDef], List[Tree], Tree) => PreTransTree)(cont: PreTransCont)(
       implicit scope: Scope, pos: Position): TailRec[Tree] = {
     /* Process captures.
@@ -922,7 +920,7 @@ private[optimizer] abstract class OptimizerCore(
 
     val innerScope = scope.withEnv(innerEnv.withLocalDefs(captureParamLocalDefs.result()))
 
-    val newBody = transformExpr(body)(innerScope)
+    val newBody = transform(body, isStat = resultType == VoidType)(innerScope)
 
     withNewLocalDefs(captureValueBindings.result()) { (localDefs, cont1) =>
       val (finalCaptureParams, finalCaptureValues) = (for {
@@ -1856,10 +1854,13 @@ private[optimizer] abstract class OptimizerCore(
     case LoadModule(moduleClassName) =>
       if (hasElidableConstructors(moduleClassName)) Skip()(stat.pos)
       else stat
-    case NewArray(_, length) if isNonNegativeIntLiteral(length) =>
-      Skip()(stat.pos)
-    case NewArray(_, length) if semantics.negativeArraySizes == CheckedBehavior.Unchecked =>
-      keepOnlySideEffects(length)
+    case NewArray(_, length) =>
+      if (isNonNegativeIntLiteral(length))
+        Skip()(stat.pos)
+      else if (semantics.negativeArraySizes == CheckedBehavior.Unchecked)
+        keepOnlySideEffects(length)
+      else
+        Transient(CheckArrayLength(length))(stat.pos)
     case ArrayValue(_, elems) =>
       Block(elems.map(keepOnlySideEffects(_)))(stat.pos)
     case ArraySelect(array, index)
@@ -2553,7 +2554,8 @@ private[optimizer] abstract class OptimizerCore(
 
             val methodDef = getMethodBody(targetMethod)
 
-            transformCapturingBody(methodDef.args, targs, methodDef.body.get, OptEnv.Empty) {
+            transformCapturingBody(methodDef.args, targs, AnyType,
+                methodDef.body.get, OptEnv.Empty) {
               (newCaptureParams, newCaptureValues, newBody) =>
                 if (!importReplacement.used.value.isUsed)
                   cancelFun()
@@ -7498,14 +7500,13 @@ private[optimizer] object OptimizerCore {
     )
     // scalafmt: {}
 
-    def buildIntrinsics(esFeatures: ESFeatures, isWasm: Boolean,
-        targetPureWasm: Boolean): Intrinsics = {
-      val allIntrinsics = if (isWasm) {
+    def buildIntrinsics(coreSpec: CoreSpec): Intrinsics = {
+      val allIntrinsics = if (coreSpec.targetIsWebAssembly) {
         commonIntrinsics ::: wasmIntrinsics :::
-        (if (targetPureWasm) Nil else wasmJSStringIntrinsics)
+        (if (coreSpec.moduleKind == ModuleKind.ESModule) wasmJSStringIntrinsics else Nil)
       } else {
         val baseIntrinsics = commonIntrinsics ::: baseJSIntrinsics
-        if (esFeatures.allowBigIntsForLongs) baseIntrinsics
+        if (coreSpec.esFeatures.allowBigIntsForLongs) baseIntrinsics
         else baseIntrinsics ++ runtimeLongIntrinsics
       }
 
