@@ -25,6 +25,14 @@ import org.scalajs.linker.backend.webassembly.Identitities.LocalID
 /** Scala.js-specific Wasm generators that are used across the board. */
 object SWasmGen {
 
+  def nonArrayTypeDataGlobalID(typeRef: NonArrayTypeRef) = typeRef match {
+    case WitResourceTypeRef(className) =>
+      // Resource classes currently share the class-backed typeData/vtable global.
+      genGlobalID.forVTable(className)
+    case _ =>
+      genGlobalID.forVTable(typeRef)
+  }
+
   def genZeroOf(tpe: Type)(implicit ctx: WasmContext): List[Instr] = {
     tpe match {
       case WitResourceType(className) =>
@@ -46,15 +54,11 @@ object SWasmGen {
       case LongType   => I64Const(0L)
       case FloatType  => F32Const(0.0f)
       case DoubleType => F64Const(0.0)
-      case StringType =>
-        if (ctx.coreSpec.wasmFeatures.targetPureWasm)
-          GlobalGet(genGlobalID.emptyStringArray)
-        else
-          ctx.stringPool.getEmptyStringInstr()
-      case UndefType => GlobalGet(genGlobalID.undef)
+      case StringType => ctx.stringPool.getEmptyStringInstr()
+      case UndefType  => GlobalGet(genGlobalID.undef)
 
       case ClassType(BoxedStringClass, true, _) =>
-        if (ctx.coreSpec.wasmFeatures.targetPureWasm)
+        if (!ctx.hasJSInterop)
           RefNull(HeapType(genTypeID.wasmString))
         else
           RefNull(Types.HeapType.NoExtern)
@@ -87,7 +91,7 @@ object SWasmGen {
   }
 
   def genLoadNonArrayTypeData(fb: FunctionBuilder, typeRef: NonArrayTypeRef): Unit =
-    fb += GlobalGet(genGlobalID.forVTable(typeRef))
+    fb += GlobalGet(nonArrayTypeDataGlobalID(typeRef))
 
   def genLoadArrayTypeData(fb: FunctionBuilder, arrayTypeRef: ArrayTypeRef): Unit = {
     val ArrayTypeRef(base, dimensions) = arrayTypeRef
@@ -109,21 +113,22 @@ object SWasmGen {
     }
   }
 
-  def genArrayValue(fb: FunctionBuilder, arrayTypeRef: ArrayTypeRef,
-      length: Int, targetPureWasm: Boolean)(
-      genElems: => Unit): Unit = {
-    genArrayValueFromUnderlying(fb, arrayTypeRef, targetPureWasm) {
+  def genArrayValue(fb: FunctionBuilder, arrayTypeRef: ArrayTypeRef, length: Int)(
+      genElems: => Unit)(
+      implicit ctx: WasmContext): Unit = {
+    genArrayValueFromUnderlying(fb, arrayTypeRef) {
       // Create the underlying array
       genElems
       fb += ArrayNewFixed(genTypeID.underlyingOf(arrayTypeRef), length)
     }
   }
 
-  def genArrayValueFromUnderlying(fb: FunctionBuilder, arrayTypeRef: ArrayTypeRef,
-      targetPureWasm: Boolean)(
-      genUnderlying: => Unit): Unit = {
+  def genArrayValueFromUnderlying(fb: FunctionBuilder, arrayTypeRef: ArrayTypeRef)(
+      genUnderlying: => Unit)(
+      implicit ctx: WasmContext): Unit = {
     genLoadArrayTypeData(fb, arrayTypeRef) // vtable
-    if (targetPureWasm) fb += I32Const(0)
+    if (!ctx.hasJSInterop)
+      fb += I32Const(0) // idHashCode
     genUnderlying
     fb += StructNew(genTypeID.forArrayClass(arrayTypeRef))
   }

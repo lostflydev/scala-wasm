@@ -17,9 +17,12 @@ import java.io._
 import scala.scalajs.js
 import scala.scalajs.js.Dynamic.global
 import scala.scalajs.LinkingInfo
+import scala.scalajs.LinkingInfo.{ESVersion, moduleKind}
+import scala.scalajs.LinkingInfo.ModuleKind.{MinimalWasmModule, WasmComponent}
 
 import java.{util => ju}
 import java.util.function._
+import java.util.Objects.requireNonNull
 
 object System {
   /* System contains a bag of unrelated features. If we naively implement
@@ -68,7 +71,7 @@ object System {
 
   @inline
   def currentTimeMillis(): scala.Long = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       WasmSystem.currentTimeMillis()
     } {
       js.Date.now().toLong
@@ -86,7 +89,7 @@ object System {
 
   @inline
   def nanoTime(): scala.Long = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       WasmSystem.nanoTime()
     } {
       (NanoTime.highPrecisionTimer.now().asInstanceOf[scala.Double] * 1000000).toLong
@@ -101,8 +104,13 @@ object System {
 
     import scala.{Boolean, Char, Byte, Short, Int, Long, Float, Double}
 
-    def mismatch(): Nothing =
-      throw new ArrayStoreException("Incompatible array types")
+    def mismatch(): Unit = {
+      requireNonNull(src)
+      requireNonNull(dest)
+
+      // Trigger an ArrayStoreException subject to UB.
+      new Array[String](1).asInstanceOf[Array[Object]](0) = Integer.valueOf(0)
+    }
 
     def impl(srcLen: Int, destLen: Int, f: BiConsumer[Int, Int]): Unit = {
       /* Perform dummy swaps to trigger an ArrayIndexOutOfBoundsException or
@@ -130,9 +138,7 @@ object System {
       }
     }
 
-    if (src == null || dest == null) {
-      throw new NullPointerException()
-    } else (src match {
+    src match {
       case src: Array[AnyRef] =>
         dest match {
           case dest: Array[AnyRef] => impl(src.length, dest.length, (i, j) => dest(i) = src(j))
@@ -180,7 +186,7 @@ object System {
         }
       case _ =>
         mismatch()
-    })
+    }
   }
 
   @inline
@@ -192,7 +198,8 @@ object System {
   private object SystemProperties {
 
     private val storageImpl: StorageImpl = {
-      LinkingInfo.linkTimeIf[StorageImpl](LinkingInfo.targetPureWasm) {
+      LinkingInfo.linkTimeIf[StorageImpl](
+          moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
         StorageImpl.HashMapStorageImpl
       } {
         StorageImpl.DictStorageImpl
@@ -369,9 +376,7 @@ object System {
 
   @inline
   def getenv(name: String): String = {
-    if (name eq null)
-      throw new NullPointerException
-
+    requireNonNull(name)
     null
   }
 
@@ -460,7 +465,7 @@ private final class JSConsoleBasedPrintStream(isErr: scala.Boolean)
   override def close(): Unit = ()
 
   private def doWriteLine(line: String): Unit = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       WasmSystem.print(line)
     } {
       import js.DynamicImplicits.truthValue

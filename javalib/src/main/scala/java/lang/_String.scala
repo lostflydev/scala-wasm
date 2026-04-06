@@ -14,18 +14,17 @@ package java.lang
 
 import scala.annotation.{switch, tailrec}
 
-import java.util.Comparator
-
 import scala.scalajs.js
-import scala.scalajs.js.annotation._
 import scala.scalajs.js.JSStringOps.enableJSStringOps
 import scala.scalajs.LinkingInfo
-import scala.scalajs.LinkingInfo.ESVersion
+import scala.scalajs.LinkingInfo.{ESVersion, moduleKind}
+import scala.scalajs.LinkingInfo.ModuleKind.{MinimalWasmModule, WasmComponent}
 
 import java.lang.constant.{Constable, ConstantDesc}
 import java.nio.ByteBuffer
 import java.nio.charset.Charset
-import java.util.Locale
+import java.util.{Comparator, Locale}
+import java.util.Objects.requireNonNull
 import java.util.function._
 import java.util.regex._
 
@@ -59,7 +58,7 @@ final class _String private () // scalastyle:ignore
 
   // Wasm intrinsic
   def codePointAt(index: Int): Int = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       Character.codePointAtImpl(this, index)
     } {
       if (LinkingInfo.esVersion >= ESVersion.ES2015) {
@@ -201,12 +200,13 @@ final class _String private () // scalastyle:ignore
 
   @inline
   def endsWith(suffix: String): scala.Boolean = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       regionMatches(thisString.length() - suffix.length, suffix, 0, suffix.length)
     } {
       if (LinkingInfo.esVersion >= ESVersion.ES2015) {
-        suffix.getClass() // null check
-        thisString.asInstanceOf[js.Dynamic].endsWith(suffix).asInstanceOf[scala.Boolean]
+        thisString.asInstanceOf[js.Dynamic]
+          .endsWith(requireNonNull(suffix))
+          .asInstanceOf[scala.Boolean]
       } else {
         thisString.jsSubstring(this.length() - suffix.length()) == suffix
       }
@@ -226,10 +226,26 @@ final class _String private () // scalastyle:ignore
     res
   }
 
-  def getChars(srcBegin: Int, srcEnd: Int, dst: Array[Char],
-      dstBegin: Int): Unit = {
-    if (srcEnd > length() || srcBegin < 0 || srcEnd < 0 || srcBegin > srcEnd)
-      throw new StringIndexOutOfBoundsException("Index out of Bound")
+  def getChars(srcBegin: Int, srcEnd: Int, dst: Array[Char], dstBegin: Int): Unit = {
+    val dstLength = dst.length // implies null check
+
+    // Bounds checks on the source
+    if (srcEnd > length() || srcBegin < 0 || srcEnd < 0 || srcBegin > srcEnd) {
+      if (srcBegin < 0)
+        charAt(srcBegin)
+      if (srcEnd > length())
+        charAt(srcEnd)
+      charAt(-1)
+    }
+
+    /* Bounds checks on the destination.
+     * Intuitively, they should throw ArrayIOOBE. However, in practice, the JVM
+     * throws throws a StringIOOBE. We follow that behavior.
+     */
+    if (dstBegin < 0)
+      "".charAt(dstBegin)
+    if (dstBegin > dstLength - (srcEnd - srcBegin))
+      "".charAt(dstBegin + (srcEnd - srcBegin))
 
     val offset = dstBegin - srcBegin
     var i = srcBegin
@@ -246,7 +262,7 @@ final class _String private () // scalastyle:ignore
     indexOf(Character.toString(ch), fromIndex)
 
   def indexOf(str: String): Int = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       indexOf(str, 0)
     } {
       thisString.jsIndexOf(str)
@@ -254,7 +270,7 @@ final class _String private () // scalastyle:ignore
   }
 
   def indexOf(str: String, fromIndex: Int): Int = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       val thisLen = thisString.length()
       val strLen = str.length()
 
@@ -303,7 +319,7 @@ final class _String private () // scalastyle:ignore
 
   @inline
   def lastIndexOf(str: String): Int = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       val thisLen = thisString.length()
       lastIndexOf(str, thisLen)
     } {
@@ -316,7 +332,7 @@ final class _String private () // scalastyle:ignore
   def lastIndexOf(str: String, fromIndex: Int): Int = {
     if (fromIndex < 0) -1
     else {
-      LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+      LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
         val thisLen = thisString.length()
         val strLen = str.length()
 
@@ -365,16 +381,15 @@ final class _String private () // scalastyle:ignore
    */
   def regionMatches(ignoreCase: scala.Boolean, toffset: Int, other: String,
       ooffset: Int, len: Int): scala.Boolean = {
-    if (other == null) {
-      throw new NullPointerException()
-    } else if (toffset < 0 || ooffset < 0 || len > this.length() - toffset ||
-        len > other.length() - ooffset) {
+    val otherNonNull = requireNonNull(other)
+    if (toffset < 0 || ooffset < 0 || len > this.length() - toffset ||
+        len > otherNonNull.length() - ooffset) {
       false
     } else if (len <= 0) {
       true
     } else {
       val left = this.substring(toffset, toffset + len)
-      val right = other.substring(ooffset, ooffset + len)
+      val right = otherNonNull.substring(ooffset, ooffset + len)
       if (ignoreCase) left.equalsIgnoreCase(right) else left == right
     }
   }
@@ -390,7 +405,8 @@ final class _String private () // scalastyle:ignore
       throw new IllegalArgumentException
     } else {
       LinkingInfo.linkTimeIf(
-          LinkingInfo.esVersion >= ESVersion.ES2015 && !LinkingInfo.targetPureWasm) {
+          LinkingInfo.esVersion >= ESVersion.ES2015 &&
+          moduleKind != MinimalWasmModule && moduleKind != WasmComponent) {
         /* This will throw a `js.RangeError` if `count` is too large, instead of
          * an `OutOfMemoryError`. That's fine because the behavior of `repeat` is
          * not specified for `count` too large.
@@ -409,7 +425,7 @@ final class _String private () // scalastyle:ignore
             str += str
             remainingIters -= 1
           }
-          LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+          LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
             str += str.substring(0, resultLength - str.length)
           } {
             str += str.jsSubstring(0, resultLength - str.length)
@@ -426,10 +442,10 @@ final class _String private () // scalastyle:ignore
 
   @inline
   def replace(target: CharSequence, replacement: CharSequence): String = {
-    LinkingInfo.linkTimeIf(!LinkingInfo.targetPureWasm) {
-      thisString.jsSplit(target.toString).join(replacement.toString)
-    } {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       replaceInternal(target, replacement)
+    } {
+      thisString.jsSplit(target.toString).join(replacement.toString)
     }
   }
 
@@ -476,12 +492,13 @@ final class _String private () // scalastyle:ignore
 
   @inline
   def startsWith(prefix: String): scala.Boolean = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       regionMatches(0, prefix, 0, prefix.length())
     } {
       if (LinkingInfo.esVersion >= ESVersion.ES2015) {
-        prefix.getClass() // null check
-        thisString.asInstanceOf[js.Dynamic].startsWith(prefix).asInstanceOf[scala.Boolean]
+        thisString.asInstanceOf[js.Dynamic]
+          .startsWith(requireNonNull(prefix))
+          .asInstanceOf[scala.Boolean]
       } else {
         thisString.jsSubstring(0, prefix.length()) == prefix
       }
@@ -490,16 +507,29 @@ final class _String private () // scalastyle:ignore
 
   @inline
   def startsWith(prefix: String, toffset: Int): scala.Boolean = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
-      regionMatches(toffset, prefix, 0, prefix.length())
-    } {
-      if (LinkingInfo.esVersion >= ESVersion.ES2015) {
-        prefix.getClass() // null check
-        (toffset <= length() && toffset >= 0 &&
-          thisString.asInstanceOf[js.Dynamic].startsWith(prefix, toffset).asInstanceOf[scala.Boolean])
-      } else {
-        (toffset <= length() && toffset >= 0 &&
-        thisString.jsSubstring(toffset, toffset + prefix.length()) == prefix)
+    /* If `prefix == null` and the offset is out of bounds, the result is not
+     * clearly specified. The JavaDoc could be interpreted as either returning
+     * false or throwing. The JVM is inconsistent. On Temurin, it returns
+     * `false` for a negative `toffset`, but throws an NPE for
+     * `toffset >= this.length()`.
+     *
+     * Since our NPEs are UB, we choose to be maximally tolerant. We want to
+     * delay the UB until there is no other choice. This guarantees that *if*
+     * the JVM returns `false`, *then* we don't run into UB. We run into UB
+     * *only if* the JVM throws an NPE (but not always).
+     */
+
+    toffset <= length() && toffset >= 0 && {
+      LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
+        regionMatches(toffset, prefix, 0, prefix.length())
+      } {
+        if (LinkingInfo.esVersion >= ESVersion.ES2015) {
+          thisString.asInstanceOf[js.Dynamic]
+            .startsWith(requireNonNull(prefix), toffset)
+            .asInstanceOf[scala.Boolean]
+        } else {
+          thisString.jsSubstring(toffset, toffset + prefix.length()) == prefix
+        }
       }
     }
   }
@@ -515,7 +545,7 @@ final class _String private () // scalastyle:ignore
     if (beginIndex < 0 || beginIndex > length())
       charAt(beginIndex)
 
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       this.substring(beginIndex, thisString.length)
     } {
       thisString.jsSubstring(beginIndex)
@@ -533,7 +563,7 @@ final class _String private () // scalastyle:ignore
     if (endIndex < beginIndex)
       charAt(-1)
 
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       val length = thisString.length
       val builder = new StringBuilder(endIndex - beginIndex)
       var i = beginIndex
@@ -725,7 +755,7 @@ final class _String private () // scalastyle:ignore
 
   @inline
   def toLowerCase(): String = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       this.asInstanceOf[_String].toLowerCaseImpl()
     } {
       this.asInstanceOf[js.Dynamic].toLowerCase().asInstanceOf[String]
@@ -825,7 +855,7 @@ for (cp <- 0 to Character.MAX_CODE_POINT) {
 
   @inline
   def toUpperCase(): String = {
-    LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       replaceCharsAtIndex { i =>
         val c = this.charAt(i)
         if (c < 0x80) null // fast-forward ASCII characters
@@ -1168,10 +1198,8 @@ object _String { // scalastyle:ignore
     `new`(value, 0, value.length)
 
   def `new`(value: Array[Char], offset: Int, count: Int): String = {
+    checkBoundsForNewFromArray(offset, count, value.length)
     val end = offset + count
-    if (offset < 0 || end < offset || end > value.length)
-      throw new StringIndexOutOfBoundsException
-
     var result = ""
     var i = offset
     while (i != end) {
@@ -1204,10 +1232,8 @@ object _String { // scalastyle:ignore
   }
 
   def `new`(codePoints: Array[Int], offset: Int, count: Int): String = {
+    checkBoundsForNewFromArray(offset, count, codePoints.length)
     val end = offset + count
-    if (offset < 0 || end < offset || end > codePoints.length)
-      throw new StringIndexOutOfBoundsException
-
     var result = ""
     var i = offset
     while (i != end) {
@@ -1217,17 +1243,29 @@ object _String { // scalastyle:ignore
     result
   }
 
-  def `new`(original: String): String = {
-    if (original == null)
-      throw new NullPointerException
-    original
-  }
+  def `new`(original: String): String =
+    requireNonNull(original)
 
   def `new`(buffer: java.lang.StringBuffer): String =
     buffer.toString
 
   def `new`(builder: java.lang.StringBuilder): String =
     builder.toString
+
+  @inline
+  private def checkBoundsForNewFromArray(offset: Int, count: Int, arrayLength: Int): Unit = {
+    /* Publicly specified as throwing an IndexOutOfBoundsException.
+     * Intuitively, should throw an ArrayIOOBE. However, in practice, the JVM
+     * throws a StringIOOBE. We replicate that behavior.
+     */
+    if (offset < 0 || count < 0 || offset > arrayLength - count) {
+      if (offset < 0 || offset >= arrayLength)
+        "".charAt(offset)
+      if (count < 0)
+        "".charAt(count)
+      "".charAt(offset + count - 1)
+    }
+  }
 
   // Static methods (aka methods on the companion object)
 

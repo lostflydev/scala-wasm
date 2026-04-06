@@ -54,8 +54,6 @@ private[optimizer] abstract class OptimizerCore(
 
   private val isWasm: Boolean = config.coreSpec.targetIsWebAssembly
 
-  private val targetPureWasm: Boolean = config.coreSpec.wasmFeatures.targetPureWasm
-
   // Uncomment and adapt to print debug messages only during one method
   // lazy val debugThisMethod: Boolean =
   //  debugID == "java.lang.FloatingPointBits$.numberHashCode;D;I"
@@ -146,7 +144,7 @@ private[optimizer] abstract class OptimizerCore(
     !config.coreSpec.esFeatures.allowBigIntsForLongs && !isWasm
 
   private val intrinsics =
-    Intrinsics.buildIntrinsics(config.coreSpec.esFeatures, isWasm, targetPureWasm)
+    Intrinsics.buildIntrinsics(config.coreSpec)
 
   private val integerDivisions = new IntegerDivisions(useRuntimeLong)
 
@@ -843,7 +841,7 @@ private[optimizer] abstract class OptimizerCore(
       .withLocalDefs(paramLocalDefs)
       .withLocalDefs(restParamLocalDef.toList)
 
-    transformCapturingBody(captureParams, tcaptureValues, body, innerEnv) {
+    transformCapturingBody(captureParams, tcaptureValues, resultType, body, innerEnv) {
       (newCaptureParams, newCaptureValues, newBody) =>
         val newClosure = {
           Closure(flags, newCaptureParams, newParams, newRestParam, resultType,
@@ -854,7 +852,7 @@ private[optimizer] abstract class OptimizerCore(
   }
 
   private def transformCapturingBody(captureParams: List[ParamDef],
-      tcaptureValues: List[PreTransform], body: Tree, innerEnv: OptEnv)(
+      tcaptureValues: List[PreTransform], resultType: Type, body: Tree, innerEnv: OptEnv)(
       inner: (List[ParamDef], List[Tree], Tree) => PreTransTree)(cont: PreTransCont)(
       implicit scope: Scope, pos: Position): TailRec[Tree] = {
     /* Process captures.
@@ -922,7 +920,7 @@ private[optimizer] abstract class OptimizerCore(
 
     val innerScope = scope.withEnv(innerEnv.withLocalDefs(captureParamLocalDefs.result()))
 
-    val newBody = transformExpr(body)(innerScope)
+    val newBody = transform(body, isStat = resultType == VoidType)(innerScope)
 
     withNewLocalDefs(captureValueBindings.result()) { (localDefs, cont1) =>
       val (finalCaptureParams, finalCaptureValues) = (for {
@@ -1856,10 +1854,13 @@ private[optimizer] abstract class OptimizerCore(
     case LoadModule(moduleClassName) =>
       if (hasElidableConstructors(moduleClassName)) Skip()(stat.pos)
       else stat
-    case NewArray(_, length) if isNonNegativeIntLiteral(length) =>
-      Skip()(stat.pos)
-    case NewArray(_, length) if semantics.negativeArraySizes == CheckedBehavior.Unchecked =>
-      keepOnlySideEffects(length)
+    case NewArray(_, length) =>
+      if (isNonNegativeIntLiteral(length))
+        Skip()(stat.pos)
+      else if (semantics.negativeArraySizes == CheckedBehavior.Unchecked)
+        keepOnlySideEffects(length)
+      else
+        Transient(CheckArrayLength(length))(stat.pos)
     case ArrayValue(_, elems) =>
       Block(elems.map(keepOnlySideEffects(_)))(stat.pos)
     case ArraySelect(array, index)
@@ -2553,7 +2554,8 @@ private[optimizer] abstract class OptimizerCore(
 
             val methodDef = getMethodBody(targetMethod)
 
-            transformCapturingBody(methodDef.args, targs, methodDef.body.get, OptEnv.Empty) {
+            transformCapturingBody(methodDef.args, targs, AnyType,
+                methodDef.body.get, OptEnv.Empty) {
               (newCaptureParams, newCaptureValues, newBody) =>
                 if (!importReplacement.used.value.isUsed)
                   cancelFun()
@@ -3367,6 +3369,81 @@ private[optimizer] abstract class OptimizerCore(
 
           case _ =>
             default
+        }
+
+      // java.util.Objects
+
+      case RequireNonNullNoMessage =>
+        // Replace by a checkNotNull so that the result gets a refined type in the process
+        val List(tobj) = targs
+        cont(checkNotNull(tobj))
+
+      case RequireNonNullWithMessage | RequireNonNullWithMessageSupplier =>
+        val List(tobj, tmessage) = targs
+
+        def objBinding = Binding.temp(LocalName("obj"), tobj)
+        def messageBinding = Binding.temp(LocalName("message"), tmessage)
+
+        semantics.nullPointers match {
+          case CheckedBehavior.Compliant if tobj.tpe.isNullable =>
+            /* Inline the specified semantics. We don't use the regular inlined
+             * body because it throws a dummy NPE that it catches before
+             * rethrowing the correct one.
+             *
+             * The constructor of NullPointerException and the `get()` method
+             * of `Supplier` must be reachable, since the javalib code must
+             * reference them (otherwise it could not be valid in the first
+             * place).
+             */
+            withNewLocalDefs(List(objBinding, messageBinding)) { (localDefs, cont1) =>
+              val List(objLocalDef, messageLocalDef) = localDefs
+
+              val actualMessage: Tree = if (intrinsicCode == RequireNonNullWithMessage) {
+                messageLocalDef.newReplacement
+              } else {
+                trampoline {
+                  pretransformApply(ApplyFlags.empty, messageLocalDef.toPreTransform,
+                      MethodIdent(SupplierGetMethodName), Nil, AnyType,
+                      isStat = false, usePreTransform = true) { tresultAny =>
+                    TailCalls.done {
+                      finishTransformExpr(foldAsInstanceOf(tresultAny, StringClassType))
+                    }
+                  }
+                }
+              }
+
+              val resultType = objLocalDef.tpe.base.toNonNullable
+
+              cont1(PreTransTree(Block(
+                If(BinaryOp(BinaryOp.===, objLocalDef.newReplacement, Null()), {
+                  UnaryOp(UnaryOp.Throw,
+                      New(NullPointerExceptionClass,
+                          MethodIdent(StringArgConstructorName), List(actualMessage)))
+                }, {
+                  finishTransformExpr(foldCast(objLocalDef.toPreTransform, resultType))
+                })(resultType)
+              )))
+            }(cont)
+
+          case _ =>
+            /* Evaluate the arguments, drop the message{,Supplier}, and check
+             * the obj for null (which is a cast in Unchecked). We can do this
+             * because the chosen semantics for the Fatal and Unchecked
+             * overloads of `requireNonNull` disregard the message{,Supplier}.
+             */
+            finishTransformStat(tmessage) match {
+              case Skip() =>
+                // Avoid the binding for tobj; use it as is
+                cont(checkNotNull(tobj))
+
+              case evalMessageStat =>
+                withNewLocalDef(objBinding) { (objLocalDef, cont1) =>
+                  cont1(PreTransBlock(
+                    evalMessageStat,
+                    checkNotNull(objLocalDef.toPreTransform)
+                  ))
+                }(cont)
+            }
         }
 
       // js.special
@@ -6434,12 +6511,15 @@ private[optimizer] object OptimizerCore {
     FieldName(JavaScriptExceptionClass, SimpleFieldName("exception"))
 
   private val AnyArgConstructorName = MethodName.constructor(List(ClassRef(ObjectClass)))
+  private val StringArgConstructorName = MethodName.constructor(List(ClassRef(BoxedStringClass)))
 
   private val TupleFirstMethodName = MethodName("_1", Nil, ClassRef(ObjectClass))
   private val TupleSecondMethodName = MethodName("_2", Nil, ClassRef(ObjectClass))
 
   private val ClassTagApplyMethodName =
     MethodName("apply", List(ClassRef(ClassClass)), ClassRef(ClassName("scala.reflect.ClassTag")))
+
+  private val SupplierGetMethodName = MethodName("get", Nil, ObjectRef)
 
   def isUnsignedPowerOf2(x: Int): Boolean =
     (x & (x - 1)) == 0 && x != 0
@@ -7338,7 +7418,11 @@ private[optimizer] object OptimizerCore {
 
     final val ClassGetName = GenericArrayBuilderResult + 1
 
-    final val ArrayToJSArray = ClassGetName + 1
+    final val RequireNonNullNoMessage = ClassGetName + 1
+    final val RequireNonNullWithMessage = RequireNonNullNoMessage + 1
+    final val RequireNonNullWithMessageSupplier = RequireNonNullWithMessage + 1
+
+    final val ArrayToJSArray = RequireNonNullWithMessageSupplier + 1
 
     final val ObjectLiteral = ArrayToJSArray + 1
 
@@ -7373,6 +7457,7 @@ private[optimizer] object OptimizerCore {
     private val O = ClassRef(ObjectClass)
     private val ClassClassRef = ClassRef(ClassClass)
     private val StringClassRef = ClassRef(BoxedStringClass)
+    private val SupplierClassRef = ClassRef(ClassName("java.util.function.Supplier"))
     private val SeqClassRef = ClassRef(ClassName("scala.collection.Seq"))
     private val ImmutableSeqClassRef = ClassRef(ClassName("scala.collection.immutable.Seq"))
     private val JSObjectClassRef = ClassRef(ClassName("scala.scalajs.js.Object"))
@@ -7395,6 +7480,11 @@ private[optimizer] object OptimizerCore {
       ),
       ClassName("java.lang.Class") -> List(
         m("getName", Nil, StringClassRef) -> ClassGetName
+      ),
+      ClassName("java.util.Objects$") -> List(
+        m("requireNonNull", List(O), O) -> RequireNonNullNoMessage,
+        m("requireNonNull", List(O, StringClassRef), O) -> RequireNonNullWithMessage,
+        m("requireNonNull", List(O, SupplierClassRef), O) -> RequireNonNullWithMessageSupplier
       ),
       ClassName("scala.scalajs.runtime.package$") -> List(
         m("genericArrayToJSArray", List(O), JSArrayClassRef) -> ArrayToJSArray,
@@ -7498,14 +7588,13 @@ private[optimizer] object OptimizerCore {
     )
     // scalafmt: {}
 
-    def buildIntrinsics(esFeatures: ESFeatures, isWasm: Boolean,
-        targetPureWasm: Boolean): Intrinsics = {
-      val allIntrinsics = if (isWasm) {
+    def buildIntrinsics(coreSpec: CoreSpec): Intrinsics = {
+      val allIntrinsics = if (coreSpec.targetIsWebAssembly) {
         commonIntrinsics ::: wasmIntrinsics :::
-        (if (targetPureWasm) Nil else wasmJSStringIntrinsics)
+        (if (coreSpec.moduleKind == ModuleKind.ESModule) wasmJSStringIntrinsics else Nil)
       } else {
         val baseIntrinsics = commonIntrinsics ::: baseJSIntrinsics
-        if (esFeatures.allowBigIntsForLongs) baseIntrinsics
+        if (coreSpec.esFeatures.allowBigIntsForLongs) baseIntrinsics
         else baseIntrinsics ++ runtimeLongIntrinsics
       }
 

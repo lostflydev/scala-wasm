@@ -13,6 +13,7 @@
 package java.io
 
 import java.util.Arrays
+import java.util.Objects.requireNonNull
 
 abstract class InputStream extends Closeable {
   def read(): Int
@@ -75,7 +76,7 @@ abstract class InputStream extends Closeable {
            * - len <= Integer.MAX_VALUE (because of its type)
            */
           val newLen =
-            if (Integer.MAX_VALUE / 2 > buf.length) Integer.MAX_VALUE
+            if (buf.length > Integer.MAX_VALUE / 2) Integer.MAX_VALUE
             else buf.length * 2
           buf = Arrays.copyOf(buf, Math.min(len, newLen))
         }
@@ -143,7 +144,7 @@ abstract class InputStream extends Closeable {
   def markSupported(): Boolean = false
 
   def transferTo(out: OutputStream): Long = {
-    out.getClass() // Trigger NPE (if enabled).
+    val outNonNull = requireNonNull(out)
 
     var transferred = 0L
     val buf = new Array[Byte](4096)
@@ -152,7 +153,7 @@ abstract class InputStream extends Closeable {
     while (bytesRead != -1) {
       bytesRead = read(buf)
       if (bytesRead != -1) {
-        out.write(buf, 0, bytesRead)
+        outNonNull.write(buf, 0, bytesRead)
         transferred += bytesRead
       }
     }

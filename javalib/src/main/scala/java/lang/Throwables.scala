@@ -13,9 +13,12 @@
 package java.lang
 
 import java.util.function._
+import java.util.Objects.requireNonNull
 
 import scala.scalajs.js.annotation.JSExport
 import scala.scalajs.LinkingInfo
+import scala.scalajs.LinkingInfo.moduleKind
+import scala.scalajs.LinkingInfo.ModuleKind.{MinimalWasmModule, WasmComponent}
 
 class Throwable protected (s: String, private var e: Throwable,
     enableSuppression: scala.Boolean, writableStackTrace: scala.Boolean)
@@ -47,17 +50,17 @@ class Throwable protected (s: String, private var e: Throwable,
   def getLocalizedMessage(): String = getMessage()
 
   def fillInStackTrace(): Throwable = {
-    LinkingInfo.linkTimeIf(!LinkingInfo.targetPureWasm) {
-      jsErrorForStackTrace = StackTrace.captureJSError(this)
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
       this
     } {
+      jsErrorForStackTrace = StackTrace.captureJSError(this)
       this
     }
   }
 
   def getStackTrace(): Array[StackTraceElement] = {
     if (stackTrace eq null) {
-      LinkingInfo.linkTimeIf(LinkingInfo.targetPureWasm) {
+      LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
         stackTrace = new Array[StackTraceElement](0)
       } {
         if (writableStackTrace)
@@ -70,18 +73,19 @@ class Throwable protected (s: String, private var e: Throwable,
   }
 
   def setStackTrace(stackTrace: Array[StackTraceElement]): Unit = {
-    LinkingInfo.linkTimeIf(!LinkingInfo.targetPureWasm) {
+    LinkingInfo.linkTimeIf(moduleKind == MinimalWasmModule || moduleKind == WasmComponent) {
+      // do nothing
+    } {
       if (writableStackTrace) {
         var i = 0
         while (i < stackTrace.length) {
-          if (stackTrace(i) eq null)
-            throw new NullPointerException()
+          requireNonNull(stackTrace(i))
           i += 1
         }
 
         this.stackTrace = stackTrace.clone()
       }
-    } {}
+    }
   }
 
   def printStackTrace(): Unit = printStackTrace(System.err)
@@ -166,8 +170,7 @@ class Throwable protected (s: String, private var e: Throwable,
   }
 
   def addSuppressed(exception: Throwable): Unit = {
-    if (exception eq null)
-      throw new NullPointerException
+    requireNonNull(exception)
     if (exception eq this)
       throw new IllegalArgumentException
 
